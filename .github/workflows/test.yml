@@ -1,0 +1,94 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # Explicit native runners keep architecture coverage independent of -latest.
+      # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+      matrix:
+        include:
+          - target: windows-amd64
+            runner: windows-2025
+            race: true
+            cgo: '1'
+          - target: windows-arm64
+            runner: windows-11-arm
+            # Go does not support -race on windows/arm64.
+            # https://go.dev/doc/articles/race_detector#Requirements
+            race: false
+            cgo: '0'
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            race: true
+            cgo: '1'
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            race: true
+            cgo: '1'
+          - target: darwin-amd64
+            runner: macos-15-intel
+            race: true
+            cgo: '1'
+          - target: darwin-arm64
+            runner: macos-15
+            race: true
+            cgo: '1'
+    env:
+      CGO_ENABLED: ${{ matrix.cgo }}
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Show toolchain and platform
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+
+      - name: Verify dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Static analysis
+        run: go vet ./...
+
+      - name: Test with coverage
+        run: go test -v -count=1 -timeout=5m '-coverprofile=coverage.out' ./...
+
+      - name: Test with race detector
+        if: ${{ matrix.race && !cancelled() }}
+        run: go test -race -v -count=1 -timeout=5m ./...
+
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.target }}
+          path: coverage.out
+          if-no-files-found: warn
+          retention-days: 14
