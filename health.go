@@ -44,7 +44,12 @@ func checkTool(ctx context.Context, tool Tool) ToolHealth {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	result, err := (ProcessRunner{}).Run(ctx, Invocation{Name: tool.Name, Binary: path, Args: tool.VersionArgs, CaptureBytes: 4096})
+	handle, err := start(ctx, Invocation{Name: tool.Name, Binary: path, Args: tool.VersionArgs, CaptureBytes: 4096}, false)
+	if err != nil {
+		health.Error = "version check failed or timed out"
+		return health
+	}
+	result, err := handle.Wait(context.Background())
 	if err != nil {
 		health.Error = "version check failed or timed out"
 		return health

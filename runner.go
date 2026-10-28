@@ -104,6 +104,10 @@ func Start(ctx context.Context, invocation Invocation) (*Handle, error) {
 
 // Start returns only after the process has entered its owned process tree.
 func (ProcessRunner) Start(ctx context.Context, invocation Invocation) (*Handle, error) {
+	return start(ctx, invocation, true)
+}
+
+func start(ctx context.Context, invocation Invocation, repairPermissions bool) (*Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -125,6 +129,13 @@ func (ProcessRunner) Start(ctx context.Context, invocation Invocation) (*Handle,
 		return nil, err
 	}
 	logs.stdout.writer, logs.stderr.writer = invocation.Stdout, invocation.Stderr
+	if repairPermissions {
+		invocation.Binary, err = prepareExecutable(invocation.Binary, invocation.Directory)
+		if err != nil {
+			state.finish(StateFailed, -1)
+			return nil, errors.Join(err, logs.close())
+		}
+	}
 	command := exec.Command(invocation.Binary, invocation.Args...)
 	command.Dir = invocation.Directory
 	command.Env = append(os.Environ(), invocation.Environment...)
